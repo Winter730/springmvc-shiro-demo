@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--日志级别以及优先级排序: OFF > FATAL > ERROR > WARN > INFO > DEBUG > TRACE > ALL -->
+<!--Configuration后面的status,这个用于设置log4j2自身内部的信息输出,可以不设置,当设置成trace时,你会看到log4j2内部各种详细输出-->
+<!--monitorInterval：Log4j能够自动检测修改配置 文件和重新配置本身,设置间隔秒数-->
+<configuration status="WARN" monitorInterval="1800">
+
+    <Properties>
+        <!-- ==============================================公共配置============================================== -->
+        <!-- 日志默认存放的位置,可以设置为项目根路径下,也可指定绝对路径 -->
+        <!-- 存放路径一:通用路径,window平台 -->
+        <property name="Level">L1</property>
+        <!-- ==============================================公共配置============================================== -->
+        <!--  系统  -->
+        <property name="sysCode">winterWeb</property>
+        <!-- 是否在控制台进行输出 -->
+        <property name="consolePrint">true</property>
+        <!--  日志输出格式  -->
+        <property name="pattern">%d{yyyy-MM-dd HH:mm:ss.SSS} [%level][%t] %m%n</property>
+        <!--  日志输出格式  -->
+        <property name="fileNameDatePattern">%d{yyyyMMdd}_%i</property>
+        <!--   日志默认存放的位置,可以设置为项目根路径下,也可指定绝对路径 -->
+        <property name="savePath">d:\logs\winterWeb\</property>
+        <!--  路径文件下日志文件保存最大个数  -->
+        <property name="strategyMaxSize">80</property>
+        <!--  日志默认切割的最小单位  -->
+        <property name="triggeringPolicySize">100M</property>
+        <!--  自定义文件滚动时间间隔 1为每隔1天产生新文件 -->
+        <property name="interval">1</property>
+        <!--  产生文件是否以0点偏移时间,即6点,12点,18点,0点  -->
+        <property name="modulate">true</property>
+        <!--  产生文件是否以0点偏移时间,即6点,12点,18点,0点  -->
+        <property name="maxRandomDelay">0</property>
+        <!-- 日志保存时间-->
+        <property name="saveTime">7</property>
+
+        <property name="basePath">./logs</property>
+        <!-- 控制台默认输出格式,"%-5level":日志级别,"%l":输出完整的错误位置,是小写的L,因为有行号显示,所以影响日志输出的性能 -->
+        <property name="console_log_pattern">%d{yyyy-MM-dd HH:mm:ss.SSS} [%-5level] %l - %m%n</property>
+        <!-- 日志文件默认输出格式,另类带行号输出(对日志输出性能未知);%C:大写,类名;%M:方法名;%L:行号;%m:错误信息;%n:换行 -->
+        <property name="log_pattern">%d{yyyy-MM-dd HH:mm:ss.SSS} [%-5level] %l - %m%n</property>
+        <!-- 日志默认切割的最小单位 -->
+        <property name="every_file_size">128MB</property>
+        <!-- 日志默认输出级别 -->
+        <property name="output_log_level">INFO</property>
+        <!-- ===========================================所有级别日志配置=========================================== -->
+        <!-- 日志默认存放路径(所有级别日志) -->
+        <property name="rolling_fileName">${basePath}/all.log</property>
+        <!-- 日志默认压缩路径,将超过指定文件大小的日志,自动存入按"年月"建立的文件夹下面并进行压缩,作为存档 -->
+        <property name="rolling_filePattern">${basePath}/all/%d{yyyy-MM-dd}/all-%d{yyyy-MM-dd-HH}-%i.log</property>
+        <!-- 日志默认同类型日志,同一文件夹下可以存放的数量,不设置此属性则默认为7个,filePattern最后要带%i才会生效 -->
+        <property name="rolling_max">500</property>
+        <!-- 日志默认同类型日志,多久生成一个新的日志文件,这个配置需要和filePattern结合使用;
+                如果设置为1,filePattern是%d{yyyy-MM-dd}到天的格式,则间隔一天生成一个文件
+                如果设置为12,filePattern是%d{yyyy-MM-dd-HH}到小时的格式,则间隔12小时生成一个文件 -->
+        <property name="rolling_timeInterval">12</property>
+        <!-- 日志默认同类型日志,是否对封存时间进行调制,若为true,则封存时间将以0点为边界进行调整,
+                如:现在是早上3am,interval是4,那么第一次滚动是在4am,接着是8am,12am...而不是7am -->
+        <property name="rolling_timeModulate">true</property>
+        <property name="console_print_level">INFO</property>
+    </Properties>
+
+    <!--定义appender -->
+    <appenders>
+        <!-- =======================================用来定义输出到控制台的配置======================================= -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <ThresholdFilter level="${console_print_level}" onMatch="ACCEPT" onMismatch="DENY"/>
+            <PatternLayout pattern="${console_log_pattern}"/>
+        </Console>
+
+        <!-- ================================打印root中指定的level级别以上的日志到文件================================ -->
+        <RollingFile name="RollingFile" fileName="${rolling_fileName}" filePattern="${rolling_filePattern}">
+            <PatternLayout pattern="${log_pattern}"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy interval="${rolling_timeInterval}" modulate="${warn_timeModulate}"/>
+                <SizeBasedTriggeringPolicy size="${every_file_size}"/>
+            </Policies>
+            <DefaultRolloverStrategy max="${rolling_max}" />
+        </RollingFile>
+    </appenders>
+
+    <!--	定义logger,只有定义了logger并引入的appender,appender才会生效-->
+    <loggers>
+        <logger name="com.alibaba.dubbo" level="warn" additivity="false">
+            <appender-ref ref="RollingFile"/>
+            <appender-ref ref="Console"/>
+        </logger>
+        <!--<logger name="org.springframework.web.servlet" level="warn" additivity="false">
+            <appender-ref ref="RollingFile"/>
+            <appender-ref ref="Console"/>
+        </logger>
+        <logger name="org.apache.zookeeper" level="warn" additivity="false">
+            <appender-ref ref="RollingFile"/>
+            <appender-ref ref="Console"/>
+        </logger>-->
+        <!--	建立一个默认的root的logger-->
+        <root level="info">
+            <appender-ref ref="RollingFile"/>
+            <appender-ref ref="Console"/>
+        </root>
+
+    </loggers>
+
+</configuration>
