@@ -45,7 +45,8 @@ import java.util.Map;
  */
 public class PMIAuthenticationFilter extends AuthenticationFilter {
     private static final Logger logger = LoggerFactory.getLogger(PMIAuthenticationFilter.class);
-
+    // 会话key
+    private final static String PMI_SHIRO_SESSION_ID = "pmi-shiro-session-id";
     //局部会话key
     private final static String PMI_CLIENT_SESSION_ID = "pmi-client-session-id";
     //单点同一个code所有局部会话key
@@ -132,11 +133,13 @@ public class PMIAuthenticationFilter extends AuthenticationFilter {
         if(StringUtils.isNotBlank(code)) {
             //HttpPost去校验code
             try {
+                String userName = request.getParameter("pmi_username");
                 StringBuffer ssoServerUrl = new StringBuffer(PropertiesFileUtil.getInstance("client").get("pmi.sso.server.url"));
                 HttpClient httpClient = new DefaultHttpClient();
                 HttpPost httpPost = new HttpPost(ssoServerUrl.toString() + "/sso/code");
 
                 List<NameValuePair> nameValuePairs = new ArrayList<>();
+                nameValuePairs.add(new BasicNameValuePair("userName", userName));
                 nameValuePairs.add(new BasicNameValuePair("code", code));
                 httpPost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
 
@@ -145,17 +148,19 @@ public class PMIAuthenticationFilter extends AuthenticationFilter {
                     HttpEntity httpEntity = httpResponse.getEntity();
                     JSONObject result = JSONObject.parseObject(EntityUtils.toString(httpEntity));
                     if(1 == result.getIntValue("code") && result.getString("data").equals(code)){
+
                         // code校验正确，创建局部会话
                         RedisUtil.set(PMI_CLIENT_SESSION_ID + "_" + sessionId, code, (int) session.getTimeout() / 1000);
                         // 保存code对应的局部会话sessionId，方便退出操作
                         RedisUtil.sadd(PMI_CLIENT_SESSION_IDS + "_" + code, sessionId, (int) session.getTimeout() / 1000);
-                        // 修改用户状态为登录状态
-                        //pmiSessionDao.updateStatus(sessionId, PMISession.OnlineStatus.on_line);
+
+                        // 持久化会话信息
+                        RedisUtil.lpush(PMI_SHIRO_SESSION_ID + "_" + userName, "client_" + sessionId);
                         logger.debug("当前code={}，对应的注册系统个数：{}个", code, RedisUtil.getJedis().scard(PMI_CLIENT_SESSION_IDS + "_" + code));
                         // 返回请求资源
                         try {
                             // 移除url中的token参数(此处会导致验证通过后，仍然要进行一次验证，不过如果去掉的话，将会暴露pmi_code参数，影响安全性，暂无其他方案，先搁置)
-                            String username = request.getParameter("pmi_username");
+
                             String backUrl = RequestParameterUtil.getParameterWithOutCode(WebUtils.toHttp(request));
                             HttpServletResponse httpServletResponse = WebUtils.toHttp(response);
                             httpServletResponse.sendRedirect(backUrl);

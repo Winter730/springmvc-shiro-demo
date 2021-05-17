@@ -13,7 +13,6 @@ import javax.servlet.http.HttpServletRequest;
 public class PMISessionFactory implements SessionFactory {
     @Override
     public Session createSession(SessionContext sessionContext) {
-        System.out.println(sessionContext.getSessionId());
         PMISession session = new PMISession();
         if(null != sessionContext && sessionContext instanceof WebSessionContext) {
             WebSessionContext webSessionContext = (WebSessionContext) sessionContext;
@@ -21,8 +20,6 @@ public class PMISessionFactory implements SessionFactory {
             if(null != request) {
                 session.setHost(request.getRemoteAddr());
                 session.setUserAgent(request.getHeader("User-Agent"));
-                //request.getAttribute("org.apache.shiro.web.servlet.ShiroHttpServletRequest_REQUESTED_SESSION_ID")
-
             }
         }
         return session;

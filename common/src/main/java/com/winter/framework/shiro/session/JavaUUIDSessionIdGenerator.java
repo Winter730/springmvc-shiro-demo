@@ -13,8 +13,6 @@ import java.util.UUID;
 public class JavaUUIDSessionIdGenerator implements SessionIdGenerator {
     @Override
     public Serializable generateId(Session session) {
-        System.out.println("generateId");
         return UUID.randomUUID().toString().replaceAll("-", "");
-        //return "123456789";
     }
 }

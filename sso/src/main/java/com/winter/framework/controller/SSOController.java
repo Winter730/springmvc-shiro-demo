@@ -14,6 +14,7 @@ import org.apache.shiro.authc.IncorrectCredentialsException;
 import org.apache.shiro.authc.LockedAccountException;
 import org.apache.shiro.authc.UnknownAccountException;
 import org.apache.shiro.authc.UsernamePasswordToken;
+import org.apache.shiro.crypto.hash.Hash;
 import org.apache.shiro.session.Session;
 import org.apache.shiro.subject.Subject;
 import org.slf4j.Logger;
@@ -29,10 +30,7 @@ import redis.clients.jedis.Jedis;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.net.URLEncoder;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * Created by winter on 2021/3/14
@@ -49,6 +47,10 @@ public class SSOController extends BaseController {
     private final static String PMI_SERVER_SESSION_IDS = "pmi-server-session-ids";
     //code key
     private final static String PMI_SERVER_CODE= "pmi-server-code";
+    //单点同一个code所有局部会话key
+    private final static String PMI_CLIENT_SESSION_IDS = "pmi-client-session-ids";
+    //局部会话key
+    private final static String PMI_CLIENT_SESSION_ID = "pmi-client-session-id";
 
     @Autowired
     PMISessionDao pmiSessionDao;
@@ -71,6 +73,7 @@ public class SSOController extends BaseController {
         String serverSessionId = session.getId().toString();
         //判断是否已登录,如果已登录,则回跳
         String code = RedisUtil.get(PMI_SERVER_SESSION_ID + "_" + serverSessionId);
+        String userName = (String) subject.getPrincipal();
         //code校验值
         if(StringUtils.isNotBlank(code)) {
             //回跳
@@ -79,9 +82,9 @@ public class SSOController extends BaseController {
                 backUrl = "/";
             } else {
                 if (backUrl.contains("?")) {
-                    backUrl += "&pmi_code=" + code;
+                    backUrl += "&pmi_code=" + code + "&pmi_username=" + userName;
                 } else {
-                    backUrl += "?pmi_code=" + code;
+                    backUrl += "?pmi_code=" + code + "&pmi_username=" + userName;
                 }
             }
             logger.debug("认证中心账号通过,带code回跳: {}", backUrl);
@@ -93,6 +96,12 @@ public class SSOController extends BaseController {
 
     @RequestMapping(value = "/login", method = RequestMethod.POST)
     @ResponseBody
+    /**
+     * 此处有以下可能:
+     * 1.用户首次登录
+     * 2.用户非首次登录,来自同一台机器
+     * 3.用户非首次登录，来自不同机器
+     */
     public Object login(HttpServletRequest request, HttpServletResponse response, ModelMap modelMap) {
         String userName = request.getParameter("username");
         String password = request.getParameter("password");
@@ -107,10 +116,10 @@ public class SSOController extends BaseController {
         Subject subject = SecurityUtils.getSubject();
         Session session = subject.getSession();
         String sessionId = session.getId().toString();
-        //判断是否已登录,如果已登录,则回跳,防止重复登录
-        String hasCode = RedisUtil.get(PMI_SERVER_SESSION_ID + "_" + sessionId);
-        //code校验值
-        if(StringUtils.isBlank(hasCode)) {
+        //判断是否已登录,如果已登录,则回跳,防止重复登录,同时需判断，是否为同一IP，如果不为同一IP,需删除原会话，重新登录
+        String oldSessionId = RedisUtil.get(PMI_SERVER_SESSION_ID + "_" + userName);
+        //code校验值,用户首次登录的情况
+        if(StringUtils.isBlank(oldSessionId)) {
             // 使用Shiro认证登录
             UsernamePasswordToken usernamePasswordToken = new UsernamePasswordToken(userName, password);
             try {
@@ -133,28 +142,47 @@ public class SSOController extends BaseController {
             //全局会话sessionID列表,供会话管理
             Jedis shareJedis = RedisUtil.getJedis();
             try {
-                shareJedis.lpush(PMI_SERVER_SESSION_IDS, sessionId);
+                shareJedis.sadd(PMI_SERVER_SESSION_IDS, userName);
             } finally {
                 shareJedis.close();
             }
-
-            //默认验证账号密码正确,创建code
-            String code = UUID.randomUUID().toString();
             //全局会话的code
-            RedisUtil.set(PMI_SERVER_SESSION_ID + "_" + sessionId, code, (int)subject.getSession().getTimeout() / 1000);
-            //code校验值
-            RedisUtil.set(PMI_SERVER_CODE + "_" + code, code, (int)subject.getSession().getTimeout() / 1000);
+            RedisUtil.set(PMI_SERVER_SESSION_ID + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
+            //code校验值,目前以server的sessionId作为校验值
+            RedisUtil.set(PMI_SERVER_CODE + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
             //登录成功，会话持久化(会话信息应包含sessionId以及用户信息，以确保用户在其他地方登录后，会话应当失效)
-            RedisUtil.set(PMI_SHIRO_SESSION_ID + "_" + userName, sessionId, (int)session.getTimeout() / 1000);
-            hasCode = code;
+            RedisUtil.lpush(PMI_SHIRO_SESSION_ID + "_" + userName, "server_" + sessionId);
+            Jedis jedis = RedisUtil.getJedis();
+            jedis.expire(PMI_CLIENT_SESSION_IDS + "_" + userName, (int)session.getTimeout() / 1000);
+            jedis.close();
+        } else if(!sessionId.equals(oldSessionId)){
+            //用户非首次登录，来自不同的机器的情况,需删除旧client的会话,更新新会话信息
+            Jedis jedis = RedisUtil.getJedis();
+            Set<String> clientSessionIds = jedis.smembers(PMI_CLIENT_SESSION_IDS + "_" + oldSessionId);
+            jedis.close();
+            for(String  clientSessionId : clientSessionIds){
+                RedisUtil.remove(PMI_CLIENT_SESSION_ID + "_" + clientSessionId);
+            }
+            RedisUtil.remove(PMI_CLIENT_SESSION_IDS + "_" + oldSessionId);
+            RedisUtil.remove(PMI_SHIRO_SESSION_ID + "_" + userName);
+            //全局会话的code
+            RedisUtil.set(PMI_SERVER_SESSION_ID + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
+            //code校验值,目前以server的sessionId作为校验值
+            RedisUtil.set(PMI_SERVER_CODE + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
+            //登录成功，会话持久化(会话信息应包含sessionId以及用户信息，以确保用户在其他地方登录后，会话应当失效)
+            RedisUtil.lpush(PMI_SHIRO_SESSION_ID + "_" + userName, "server_" + sessionId);
+            jedis = RedisUtil.getJedis();
+            jedis.expire(PMI_CLIENT_SESSION_IDS + "_" + userName, (int)session.getTimeout() / 1000);
+            jedis.close();
         }
+
         //回跳登录前地址
         String backUrl = request.getParameter("backUrl");
-        if(StringUtils.isNotBlank(hasCode)) {
+        if(StringUtils.isNotBlank(sessionId)) {
             if (backUrl.contains("?")) {
-                backUrl += "&pmi_code=" + hasCode;
+                backUrl += "&pmi_code=" + sessionId + "&pmi_username=" + userName;
             } else {
-                backUrl += "?pmi_code=" + hasCode;
+                backUrl += "?pmi_code=" + sessionId + "&pmi_username=" + userName;
             }
         }
         if(StringUtils.isBlank(backUrl)) {
@@ -171,7 +199,8 @@ public class SSOController extends BaseController {
     @ResponseBody
     public Object code(HttpServletRequest request) {
         String codeParam = request.getParameter("code");
-        String code = RedisUtil.get(PMI_SERVER_CODE + "_" + codeParam);
+        String userName = request.getParameter("userName");
+        String code = RedisUtil.get(PMI_SERVER_CODE + "_" + userName);
         if(StringUtils.isBlank(codeParam) || !codeParam.equals(code)){
             new WebResult(WebResultConstant.FAILED, "无效code");
         }

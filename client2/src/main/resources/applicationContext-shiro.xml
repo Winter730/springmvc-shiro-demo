@@ -65,8 +65,12 @@
     <!-- 会话DAO，可重写，持久化session -->
     <bean id="sessionDAO" class="com.winter.framework.shiro.session.PMISessionDao">
         <property name="cacheManager" ref="shiroEhCacheManager"/>
+        <property name="sessionIdGenerator" ref="javaUUIDSessionIdGenerator"/>
         <property name="activeSessionsCacheName" value="shiroSessionCache"/>
     </bean>
+
+    <bean id="javaUUIDSessionIdGenerator" class="com.winter.framework.shiro.session.JavaUUIDSessionIdGenerator"/>
+
     <!-- 会话监听器 -->
     <bean id="sessionListener" class="com.winter.framework.shiro.listen.PMISessionListener"/>
     <!-- session工厂 -->
