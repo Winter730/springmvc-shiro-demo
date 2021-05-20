@@ -6,7 +6,6 @@ import com.winter.framework.base.WebResultConstant;
 import com.winter.framework.shiro.session.PMISession;
 import com.winter.framework.shiro.session.PMISessionDao;
 import com.winter.framework.utils.RedisUtil;
-import com.winter.framework.utils.SerializableUtil;
 import com.winter.framework.utils.StringUtils;
 import org.apache.commons.lang.BooleanUtils;
 import org.apache.shiro.SecurityUtils;
@@ -14,7 +13,6 @@ import org.apache.shiro.authc.IncorrectCredentialsException;
 import org.apache.shiro.authc.LockedAccountException;
 import org.apache.shiro.authc.UnknownAccountException;
 import org.apache.shiro.authc.UsernamePasswordToken;
-import org.apache.shiro.crypto.hash.Hash;
 import org.apache.shiro.session.Session;
 import org.apache.shiro.subject.Subject;
 import org.slf4j.Logger;
@@ -39,18 +37,11 @@ import java.util.*;
 @RequestMapping("/sso")
 public class SSOController extends BaseController {
     private static final Logger logger = LoggerFactory.getLogger(SSOController.class);
-    // 会话key
-    private final static String PMI_SHIRO_SESSION_ID = "pmi-shiro-session-id";
-    //全局会话Key
-    private final static String PMI_SERVER_SESSION_ID = "pmi-server-session-id";
-    //全局会话key列表
-    private final static String PMI_SERVER_SESSION_IDS = "pmi-server-session-ids";
-    //code key
-    private final static String PMI_SERVER_CODE= "pmi-server-code";
-    //单点同一个code所有局部会话key
-    private final static String PMI_CLIENT_SESSION_IDS = "pmi-client-session-ids";
-    //局部会话key
-    private final static String PMI_CLIENT_SESSION_ID = "pmi-client-session-id";
+    // sso服务器用户信息
+    private final static String PMI_SHIRO_USER = "pmi-shiro-user";
+
+    // sso服务器授权令牌
+    private final static String PMI_SERVER_CODE = "pmi-server-code";
 
     @Autowired
     PMISessionDao pmiSessionDao;
@@ -72,7 +63,7 @@ public class SSOController extends BaseController {
         Session session = subject.getSession();
         String serverSessionId = session.getId().toString();
         //判断是否已登录,如果已登录,则回跳
-        String code = RedisUtil.get(PMI_SERVER_SESSION_ID + "_" + serverSessionId);
+        String code = RedisUtil.get(PMI_SERVER_CODE + "-" + serverSessionId);
         String userName = (String) subject.getPrincipal();
         //code校验值
         if(StringUtils.isNotBlank(code)) {
@@ -87,7 +78,7 @@ public class SSOController extends BaseController {
                     backUrl += "?pmi_code=" + code + "&pmi_username=" + userName;
                 }
             }
-            logger.debug("认证中心账号通过,带code回跳: {}", backUrl);
+            logger.info("认证中心账号通过,带code回跳: {}", backUrl);
             return "redirect:" + backUrl;
         }
 
@@ -114,12 +105,15 @@ public class SSOController extends BaseController {
         }
 
         Subject subject = SecurityUtils.getSubject();
-        Session session = subject.getSession();
+        Session session =  subject.getSession();
         String sessionId = session.getId().toString();
         //判断是否已登录,如果已登录,则回跳,防止重复登录,同时需判断，是否为同一IP，如果不为同一IP,需删除原会话，重新登录
-        String oldSessionId = RedisUtil.get(PMI_SERVER_SESSION_ID + "_" + userName);
-        //code校验值,用户首次登录的情况
-        if(StringUtils.isBlank(oldSessionId)) {
+        String oldSessionId = RedisUtil.get(PMI_SHIRO_USER + "-" + userName);
+        if(!StringUtils.isBlank(oldSessionId) && ! sessionId.equals(oldSessionId)){
+            pmiSessionDao.deleteOldSession(oldSessionId);
+        }
+
+        if(StringUtils.isBlank(oldSessionId) || (StringUtils.isNotBlank(oldSessionId) && !sessionId.equals(oldSessionId))) {
             // 使用Shiro认证登录
             UsernamePasswordToken usernamePasswordToken = new UsernamePasswordToken(userName, password);
             try {
@@ -138,42 +132,12 @@ public class SSOController extends BaseController {
                 return new WebResult(WebResultConstant.INVALID_ACCOUNT, "帐号已锁定！");
             }
             //更新session状态
-           // pmiSessionDao.updateStatus(sessionId, PMISession.OnlineStatus.on_line);
             //全局会话sessionID列表,供会话管理
-            Jedis shareJedis = RedisUtil.getJedis();
-            try {
-                shareJedis.sadd(PMI_SERVER_SESSION_IDS, userName);
-            } finally {
-                shareJedis.close();
-            }
-            //全局会话的code
-            RedisUtil.set(PMI_SERVER_SESSION_ID + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
+            RedisUtil.set(PMI_SHIRO_USER + "-" + userName,sessionId);
             //code校验值,目前以server的sessionId作为校验值
-            RedisUtil.set(PMI_SERVER_CODE + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
-            //登录成功，会话持久化(会话信息应包含sessionId以及用户信息，以确保用户在其他地方登录后，会话应当失效)
-            RedisUtil.lpush(PMI_SHIRO_SESSION_ID + "_" + userName, "server_" + sessionId);
-            Jedis jedis = RedisUtil.getJedis();
-            jedis.expire(PMI_CLIENT_SESSION_IDS + "_" + userName, (int)session.getTimeout() / 1000);
-            jedis.close();
-        } else if(!sessionId.equals(oldSessionId)){
-            //用户非首次登录，来自不同的机器的情况,需删除旧client的会话,更新新会话信息
-            Jedis jedis = RedisUtil.getJedis();
-            Set<String> clientSessionIds = jedis.smembers(PMI_CLIENT_SESSION_IDS + "_" + oldSessionId);
-            jedis.close();
-            for(String  clientSessionId : clientSessionIds){
-                RedisUtil.remove(PMI_CLIENT_SESSION_ID + "_" + clientSessionId);
-            }
-            RedisUtil.remove(PMI_CLIENT_SESSION_IDS + "_" + oldSessionId);
-            RedisUtil.remove(PMI_SHIRO_SESSION_ID + "_" + userName);
-            //全局会话的code
-            RedisUtil.set(PMI_SERVER_SESSION_ID + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
-            //code校验值,目前以server的sessionId作为校验值
-            RedisUtil.set(PMI_SERVER_CODE + "_" + userName, sessionId, (int)subject.getSession().getTimeout() / 1000);
-            //登录成功，会话持久化(会话信息应包含sessionId以及用户信息，以确保用户在其他地方登录后，会话应当失效)
-            RedisUtil.lpush(PMI_SHIRO_SESSION_ID + "_" + userName, "server_" + sessionId);
-            jedis = RedisUtil.getJedis();
-            jedis.expire(PMI_CLIENT_SESSION_IDS + "_" + userName, (int)session.getTimeout() / 1000);
-            jedis.close();
+            RedisUtil.set(PMI_SERVER_CODE + "-" + sessionId, sessionId, (int)subject.getSession().getTimeout() / 1000);
+            //更新会话状态
+            pmiSessionDao.updateStatus(sessionId, PMISession.OnlineStatus.on_line);
         }
 
         //回跳登录前地址
@@ -199,8 +163,7 @@ public class SSOController extends BaseController {
     @ResponseBody
     public Object code(HttpServletRequest request) {
         String codeParam = request.getParameter("code");
-        String userName = request.getParameter("userName");
-        String code = RedisUtil.get(PMI_SERVER_CODE + "_" + userName);
+        String code = RedisUtil.get(PMI_SERVER_CODE + "-" + codeParam);
         if(StringUtils.isBlank(codeParam) || !codeParam.equals(code)){
             new WebResult(WebResultConstant.FAILED, "无效code");
         }

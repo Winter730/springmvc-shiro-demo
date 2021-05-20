@@ -13,7 +13,6 @@
         <property name="securityManager" ref="securityManager"/>
         <property name="loginUrl" value="${pmi.sso.server.url}"/>
         <property name="successUrl" value="${pmi.successUrl}"/>
-        <property name="unauthorizedUrl" value="${pmi.unauthorizedUrl}" />
         <property name="filters">
             <util:map>
                 <entry key="authc" value-ref="pmiAuthenticationFilter"/>
@@ -63,12 +62,10 @@
             <list><ref bean="sessionListener" /></list>
         </property>
         <property name="sessionFactory" ref="sessionFactory"/>
-        <property name="cacheManager" ref="shiroEhCacheManager"/>
     </bean>
 
     <!-- 会话DAO，可重写，持久化session -->
     <bean id="sessionDAO" class="com.winter.framework.shiro.session.PMISessionDao">
-        <property name="cacheManager" ref="shiroEhCacheManager"/>
         <property name="sessionIdGenerator" ref="javaUUIDSessionIdGenerator"/>
         <property name="activeSessionsCacheName" value="shiroSessionCache"/>
     </bean>

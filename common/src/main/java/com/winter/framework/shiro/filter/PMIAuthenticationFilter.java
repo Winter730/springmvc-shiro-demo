@@ -18,8 +18,6 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.util.EntityUtils;
-import org.apache.shiro.SecurityUtils;
-import org.apache.shiro.authc.UsernamePasswordToken;
 import org.apache.shiro.session.Session;
 import org.apache.shiro.subject.Subject;
 import org.apache.shiro.web.filter.authc.AuthenticationFilter;
@@ -37,7 +35,6 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 重写authc过滤器
@@ -45,15 +42,13 @@ import java.util.Map;
  */
 public class PMIAuthenticationFilter extends AuthenticationFilter {
     private static final Logger logger = LoggerFactory.getLogger(PMIAuthenticationFilter.class);
-    // 会话key
-    private final static String PMI_SHIRO_SESSION_ID = "pmi-shiro-session-id";
-    //局部会话key
-    private final static String PMI_CLIENT_SESSION_ID = "pmi-client-session-id";
-    //单点同一个code所有局部会话key
-    private final static String PMI_CLIENT_SESSION_IDS = "pmi-client-session-ids";
+    // client会话key
+    private final static String PMI_SHIRO_SESSION_CLIENT = "pmi-shiro-session-client";
+
+    private final static String PMI_SHIRO_CONNECTIDS = "pmi-shiro-connectIds";
 
     @Autowired
-    PMISessionDao pmiSessionDao;
+    private PMISessionDao pmiSessionDao;
 
     @Override
     protected boolean isAccessAllowed(ServletRequest request, ServletResponse response, Object mappedValue) {
@@ -95,6 +90,7 @@ public class PMIAuthenticationFilter extends AuthenticationFilter {
 
     /**
      * 认证中心登录成功带回code
+     * 只有从会话会经过这个方法
      */
     private boolean validateClient(ServletRequest request, ServletResponse response) {
         Subject subject = getSubject(request, response);
@@ -102,14 +98,11 @@ public class PMIAuthenticationFilter extends AuthenticationFilter {
         String sessionId = session.getId().toString();
         //判断局部会话是否登录
         try{
-            String cacheClientSession = RedisUtil.get(PMI_CLIENT_SESSION_ID + "_" + sessionId);
+            String cacheClientSession = RedisUtil.get(PMI_SHIRO_SESSION_CLIENT + "-" + sessionId);
             if(StringUtils.isNotBlank(cacheClientSession)) {
-                //更新Code有效期
-                RedisUtil.set(PMI_CLIENT_SESSION_ID + "_" + sessionId, cacheClientSession, (int)session.getTimeout() / 1000);
+                //更新有效期
+                RedisUtil.set(PMI_SHIRO_SESSION_CLIENT + "-" + sessionId, cacheClientSession, (int)session.getTimeout() / 1000);
 
-                Jedis shardedJedis = RedisUtil.getJedis();
-                shardedJedis.expire(PMI_CLIENT_SESSION_IDS + "_" + cacheClientSession, (int)session.getTimeout() / 1000);
-                shardedJedis.close();
 
                 //移除url中的code参数
                 if(null != request.getParameter("code")){
@@ -133,13 +126,11 @@ public class PMIAuthenticationFilter extends AuthenticationFilter {
         if(StringUtils.isNotBlank(code)) {
             //HttpPost去校验code
             try {
-                String userName = request.getParameter("pmi_username");
                 StringBuffer ssoServerUrl = new StringBuffer(PropertiesFileUtil.getInstance("client").get("pmi.sso.server.url"));
                 HttpClient httpClient = new DefaultHttpClient();
                 HttpPost httpPost = new HttpPost(ssoServerUrl.toString() + "/sso/code");
 
                 List<NameValuePair> nameValuePairs = new ArrayList<>();
-                nameValuePairs.add(new BasicNameValuePair("userName", userName));
                 nameValuePairs.add(new BasicNameValuePair("code", code));
                 httpPost.setEntity(new UrlEncodedFormEntity(nameValuePairs));
 
@@ -148,15 +139,15 @@ public class PMIAuthenticationFilter extends AuthenticationFilter {
                     HttpEntity httpEntity = httpResponse.getEntity();
                     JSONObject result = JSONObject.parseObject(EntityUtils.toString(httpEntity));
                     if(1 == result.getIntValue("code") && result.getString("data").equals(code)){
+                        Jedis jedis = RedisUtil.getJedis();
+                        jedis.sadd(PMI_SHIRO_CONNECTIDS + "-" + code,PMI_SHIRO_SESSION_CLIENT + "-" + sessionId);
+                        jedis.close();
 
-                        // code校验正确，创建局部会话
-                        RedisUtil.set(PMI_CLIENT_SESSION_ID + "_" + sessionId, code, (int) session.getTimeout() / 1000);
-                        // 保存code对应的局部会话sessionId，方便退出操作
-                        RedisUtil.sadd(PMI_CLIENT_SESSION_IDS + "_" + code, sessionId, (int) session.getTimeout() / 1000);
-
-                        // 持久化会话信息
-                        RedisUtil.lpush(PMI_SHIRO_SESSION_ID + "_" + userName, "client_" + sessionId);
-                        logger.debug("当前code={}，对应的注册系统个数：{}个", code, RedisUtil.getJedis().scard(PMI_CLIENT_SESSION_IDS + "_" + code));
+                        pmiSessionDao.updateStatus(sessionId, PMISession.OnlineStatus.on_line);
+                        jedis = RedisUtil.getJedis();
+                        Long number = jedis.scard(PMI_SHIRO_CONNECTIDS + "-" + code);
+                        jedis.close();
+                        logger.info("当前code={}，对应的注册系统个数：{}个", code, number);
                         // 返回请求资源
                         try {
                             // 移除url中的token参数(此处会导致验证通过后，仍然要进行一次验证，不过如果去掉的话，将会暴露pmi_code参数，影响安全性，暂无其他方案，先搁置)
