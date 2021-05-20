@@ -30,7 +30,7 @@ function login() {
 			username: $('#username').val(),
 			password: $('#password').val(),
 			rememberMe: $('#rememberMe').is(':checked'),
-			backurl: BACK_URL
+			backUrl: BACK_URL
 		},
 		beforeSend: function() {
 

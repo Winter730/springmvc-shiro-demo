@@ -15,7 +15,6 @@
         <property name="securityManager" ref="securityManager"/>
         <property name="loginUrl" value="${pmi.sso.server.url}"/>
         <property name="successUrl" value="${pmi.successUrl}"/>
-        <property name="unauthorizedUrl" value="${pmi.unauthorizedUrl}" />
         <property name="filters">
             <util:map>
                 <entry key="authc" value-ref="pmiAuthenticationFilter"/>

@@ -9,7 +9,7 @@
 <html>
 <head>
 <meta charset="utf-8"/>
-<title><spring:message code="403"/></title>
+<title>Access forbidden!</title>
 </head>
 <body>
 <c:if test="${requestHeader == 'ajax'}">

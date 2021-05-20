@@ -48,7 +48,7 @@
 <script src="${basePath}/resources/zheng-admin/plugins/checkbix/js/checkbix.min.js"></script>
 <script>var BASE_PATH = '${basePath}';
 </script>
-<script>var BACK_URL = '${param.backurl}';</script>
+<script>var BACK_URL = '${param.backUrl}';</script>
 <script src="${basePath}/resources/zheng-admin/js/login.js"></script>
 <script>
 <c:if test="${param.forceLogout == 1}">

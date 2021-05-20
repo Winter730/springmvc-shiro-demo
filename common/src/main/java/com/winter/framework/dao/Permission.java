@@ -250,8 +250,8 @@ public class Permission implements Serializable {
     private static final Map<String, List<Permission>> permissionMap = new HashMap<>();
 
     static {
-        Permission permission1 = new Permission(1, "用户管理", "sso:user:read");
-        Permission permission2 = new Permission(2, "角色管理", "sso:role:read");
+        Permission permission1 = new Permission(1, "权限测试1", "sso:permission1:read");
+        Permission permission2 = new Permission(2, "权限测试2", "sso:permission2:read");
 
         List<Permission> admin = new ArrayList<>();
         admin.add(permission1);

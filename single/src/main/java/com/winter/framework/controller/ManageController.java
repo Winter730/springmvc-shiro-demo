@@ -2,6 +2,7 @@ package com.winter.framework.controller;
 
 
 import com.winter.framework.base.BaseController;
+import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.ModelMap;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,5 +20,12 @@ public class ManageController extends BaseController {
     public String index(ModelMap modelMap) {
         return "/manage/index";
     }
+
+    @RequiresPermissions("sso:permission2:read")
+    @RequestMapping(value = "/permission", method = RequestMethod.GET)
+    public String permission(ModelMap modelMap) {
+        return "/manage/permission";
+    }
+
 
 }

@@ -67,5 +67,6 @@
     <!-- 对静态资源文件的访问， 将无法mapping到Controller的path交给default servlet handler处理 -->
     <mvc:default-servlet-handler />
 
+    <aop:aspectj-autoproxy/>
 
 </beans>

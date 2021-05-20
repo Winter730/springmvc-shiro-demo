@@ -9,7 +9,7 @@
 <html>
 <head>
 <meta charset="utf-8"/>
-<title><spring:message code="404"/></title>
+<title>Page not found!</title>
 </head>
 <body>
 404
